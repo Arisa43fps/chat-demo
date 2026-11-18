@@ -1,5 +1,5 @@
 import clsx from 'clsx'
-import { useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   IconDarkOutline16,
   IconDataOutline16,
@@ -22,11 +22,13 @@ import {
   isChineseBrowser,
   setLocale,
   setLocation,
+  setModel,
   setThemePreference,
   setTtsVoice,
   useSettings,
   type ThemePreference,
 } from '../../services/settings.js'
+import { listModels } from '../../services/api/client.js'
 import { useTranslate, type TranslationKey, type TranslationMessage } from '../../i18n/index.js'
 import { Button } from '../base/Button.js'
 import { Modal } from '../base/Modal.js'
@@ -104,6 +106,7 @@ const SettingsContent = () => {
           ) : (
             <>
               <ApiKeyField editor={apiKeyEditor} />
+              <ModelSetting />
               <ImportHistory historyImport={historyImport} disabled={historyBusy} />
               <ExportHistory disabled={historyBusy} />
               <SettingCell
@@ -264,6 +267,64 @@ const LocationSetting = () => {
             />
           )}
         </div>
+      }
+    />
+  )
+}
+
+/** 模型列表来自 9Router 的 /v1/models；保存 Key 后自动拉取并选择第一个可用模型 */
+const ModelSetting = () => {
+  const t = useTranslate()
+  const apiKey = useSettings((state) => state.apiKey)
+  const model = useSettings((state) => state.model)
+  const [models, setModels] = useState<string[]>([])
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!apiKey) {
+      setModels([])
+      return
+    }
+    let cancelled = false
+    setLoading(true)
+    listModels(apiKey)
+      .then((ids) => {
+        if (cancelled) {
+          return
+        }
+        setModels(ids)
+        if (ids.length > 0 && !ids.includes(useSettings.getState().model)) {
+          setModel(ids[0])
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setModels([])
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false)
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [apiKey])
+
+  return (
+    <SettingCell
+      label={t('settingsModel')}
+      description={loading ? t('settingsModelLoading') : undefined}
+      status={null}
+      action={
+        <Select
+          ariaLabel={t('settingsModel')}
+          value={model}
+          placeholder={t('settingsModelPlaceholder')}
+          options={models.map((id) => ({ value: id, label: id }))}
+          onChange={setModel}
+        />
       }
     />
   )

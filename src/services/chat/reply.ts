@@ -14,22 +14,49 @@ import type {
   ReplyStatus,
   UserMessage,
 } from './types.js'
+import { loadFile } from './db.js'
+
+const blobToBase64 = (blob: Blob): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = reader.result
+      if (typeof result !== 'string') {
+        reject(new Error('Failed to read image'))
+        return
+      }
+      const comma = result.indexOf(',')
+      resolve(comma === -1 ? result : result.slice(comma + 1))
+    }
+    reader.onerror = () => reject(reader.error ?? new Error('Failed to read image'))
+    reader.readAsDataURL(blob)
+  })
 
 /**
- * 文件按 Files API 的 file_id（附件的 serverId）引用：图片用 image 块，其余用 document 块。
- * 发送前 streamReply 会先补齐 serverId；仍为 null 的是本地没有原件的附件，不进入请求。
+ * 9Router 没有 Files API，图片从 IndexedDB 读取原件后以 base64 内联发送。
+ * 本地没有原件或非图片的附件不进入请求。
  */
-const toFileBlocks = (files: FileAttachment[]): FileBlockParam[] =>
-  files.flatMap(({ serverId, isImage }) =>
-    serverId
-      ? [
-          {
-            type: isImage ? 'image' : 'document',
-            source: { type: 'file', file_id: serverId },
-          },
-        ]
-      : []
-  )
+const toFileBlocks = async (files: FileAttachment[]): Promise<FileBlockParam[]> => {
+  const blocks: FileBlockParam[] = []
+  for (const file of files) {
+    if (!file.isImage) {
+      continue
+    }
+    const blob = await loadFile(file.id)
+    if (!blob) {
+      continue
+    }
+    blocks.push({
+      type: 'image',
+      source: {
+        type: 'base64',
+        media_type: file.mimeType || blob.type || 'image/png',
+        data: await blobToBase64(blob),
+      },
+    })
+  }
+  return blocks
+}
 
 const toReplyBlock = (block: OutputBlockStart, now: number): ReplyBlock | null => {
   switch (block.type) {
@@ -201,9 +228,9 @@ const isUsableReply = (message: Message): message is AssistantMessage =>
   !message.blocks.some((block) => block.type === 'text' && block.isTemplate) &&
   getReplyText(message) !== ''
 
-/** 有文件时用内容块数组：先文件后文本，文件按 Files API 的 file_id 引用 */
-const toUserParam = ({ content, files }: UserMessage): MessageParam => {
-  const blocks = toFileBlocks(files)
+/** 有图片时用内容块数组：先图片后文本 */
+const toUserParam = async ({ content, files }: UserMessage): Promise<MessageParam> => {
+  const blocks = await toFileBlocks(files)
   return blocks.length === 0
     ? { role: 'user', content }
     : {
@@ -222,8 +249,7 @@ const toUserParam = ({ content, files }: UserMessage): MessageParam => {
  */
 const toAssistantParam = (
   { blocks }: AssistantMessage,
-  prefix = false,
-  thinking = false
+  prefix = false
 ): Extract<MessageParam, { role: 'assistant' }> => {
   const content: AssistantBlockParam[] = []
   // 成功阅读的网页靠签名恢复正文；缺少有效签名时，调用与结果都不回传。
@@ -258,11 +284,7 @@ const toAssistantParam = (
       continue
     }
     text = null
-    if (prefix && thinking && block.type === 'thinking') {
-      // 续写保留本轮思考，历史轮次的思考省略。
-      const { type, thinking, signature } = block
-      content.push({ type, thinking, signature: signature ?? '' })
-    } else if (
+    if (
       block.type === 'server_tool_use' &&
       block.kind === 'read_link' &&
       !unsignedReadLinks.has(block.id)
@@ -300,42 +322,25 @@ export const getContextRounds = (history: Message[]): [UserMessage, AssistantMes
  * 把会话转成请求的 messages：只保留「提问 + 有回答的回复」成对的轮次，最后接上本轮提问。
  * 失败或没有回答的轮次不进上下文。续写时末尾再带上本轮 assistant。
  */
-export const toRequestMessages = (
+export const toRequestMessages = async (
   history: Message[],
   question: UserMessage,
-  prefix?: AssistantMessage,
-  thinking = prefix?.thinking ?? false,
-  latestReminder?: string
-): MessageParam[] => {
+  prefix?: AssistantMessage
+): Promise<MessageParam[]> => {
   const messages: MessageParam[] = []
-  let previousReminder: string | undefined
-  const appendReminder = (reminder: string | undefined) => {
-    // 仅在当前分支首次出现或内容变化时插入快照；缺少快照的消息保持原有内容。
-    if (reminder && reminder !== previousReminder) {
-      messages.push({ role: 'latest_reminder', content: reminder })
-      previousReminder = reminder
-    }
-  }
   for (const [user, reply] of getContextRounds(history)) {
-    // 历史提问没有文字、附件也都没有 serverId 时，提问为空，连同回答一起省略。
-    if (!user.content && toFileBlocks(user.files).length === 0) {
+    const param = await toUserParam(user)
+    // 历史提问没有文字、也没有本地图片时，提问为空，连同回答一起省略。
+    if (typeof param.content === 'string' ? !param.content : param.content.length === 0) {
       continue
     }
-    appendReminder(reply.latestReminder)
-    messages.push(toUserParam(user), toAssistantParam(reply))
+    messages.push(param, toAssistantParam(reply))
   }
-  appendReminder(latestReminder)
-  messages.push(toUserParam(question))
+  messages.push(await toUserParam(question))
   if (prefix?.prefix) {
-    const assistant = toAssistantParam(prefix, true, thinking)
-    // 没有非空白正文或有效思考时直接重发原问题，避免服务端拒绝空 Prefill。
-    if (
-      assistant.content.some(
-        (block) =>
-          (block.type === 'text' && block.text.trim()) ||
-          (block.type === 'thinking' && block.thinking.trim())
-      )
-    ) {
+    const assistant = toAssistantParam(prefix, true)
+    // 没有非空白正文时直接重发原问题，避免服务端拒绝空 Prefill。
+    if (assistant.content.some((block) => block.type === 'text' && block.text.trim())) {
       messages.push(assistant)
     }
   }

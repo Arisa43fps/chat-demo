@@ -4,7 +4,8 @@
  * 声明 deepseek_web_search / deepseek_read_url 或设置 safety_check.level 为 high 时进入扩展模式。
  */
 
-export type ChatModel = 'deepseek-flash' | 'deepseek-v4-pro'
+/** 模型 ID 由 9Router /v1/models 提供 */
+export type ChatModel = string
 
 // ---------- 响应：内容块 ----------
 
@@ -125,13 +126,10 @@ export type ToolUseBlock = { type: 'tool_use'; id: string; name: string; input: 
 
 export type TextBlockParam = { type: 'text'; text: string }
 
-/**
- * 文件块：引用经 Files API 上传的文件，图片用 image、其余用 document；
- * 图片请求需带 anthropic-beta: files-api-2025-04-14；扩展模式不支持 document，返回 400。
- */
+/** 图片块：9Router 没有 Files API，图片以 base64 内联发送 */
 export type FileBlockParam = {
-  type: 'image' | 'document'
-  source: { type: 'file'; file_id: string }
+  type: 'image'
+  source: { type: 'base64'; media_type: string; data: string }
 }
 
 /** 接口接受的调用块；历史只回传 kind 为 read_link 的调用 */
@@ -155,31 +153,17 @@ export type AssistantBlockParam =
 
 /** 末尾 assistant 自动触发继续生成，无需 prefix 字段 */
 export type MessageParam =
-  /** Chat Engine 扩展角色，位于对应 user 前；需服务端支持 latest_reminder。 */
-  | { role: 'latest_reminder'; content: string }
   | { role: 'user'; content: string | (FileBlockParam | TextBlockParam)[] }
   | { role: 'assistant'; content: AssistantBlockParam[] }
 
-/** 开启联网搜索与边想边搜 */
-export type DeepseekWebSearchTool = {
-  type: 'deepseek_web_search'
-  name: 'deepseek_web_search'
-}
-
-/** 阅读本轮用户消息中的链接，与搜索工具独立声明 */
-export type DeepseekReadUrlTool = {
-  type: 'deepseek_read_url'
-  name: 'deepseek_read_url'
-}
-
+/** Anthropic Messages 请求：9Router 会把 thinking 翻译给上游模型 */
 export type CreateMessageRequest = {
   model: ChatModel
+  max_tokens: number
   system: string
   messages: MessageParam[]
-  thinking: { type: 'enabled' | 'disabled' }
-  tools: (DeepseekWebSearchTool | DeepseekReadUrlTool)[]
-  safety_check: { level: 'high' }
-  title?: { enabled: boolean }
+  /** 未开启时省略，避免上游拒绝 disabled 形式 */
+  thinking?: { type: 'enabled'; budget_tokens: number }
 }
 
 // ---------- 响应：流式事件 ----------

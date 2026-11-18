@@ -16,6 +16,21 @@ const cssLoader = {
   options: { targets },
 }
 
+/** 9Router 网关地址；可用 ROUTER_ORIGIN 环境变量覆盖 */
+const ROUTER_ORIGIN = process.env.ROUTER_ORIGIN ?? 'http://127.0.0.1:20128'
+
+/** 开发服务器把 /router 代理到 9Router，浏览器只访问同源地址，避开 CORS */
+const defaultDevServer: Configuration['devServer'] = {
+  proxy: [
+    {
+      context: ['/router'],
+      target: ROUTER_ORIGIN,
+      changeOrigin: true,
+      pathRewrite: { '^/router': '' },
+    },
+  ],
+}
+
 type ConfigOptions = {
   /** 公开 API 的地址，注入为 __API_ORIGIN__ */
   apiOrigin?: string
@@ -25,8 +40,8 @@ type ConfigOptions = {
 
 /** 创建构建配置，支持自定义 API 地址和开发服务器选项 */
 export const createConfig = ({
-  apiOrigin = 'https://api.deepseek.com',
-  devServer,
+  apiOrigin = '/router',
+  devServer = defaultDevServer,
 }: ConfigOptions = {}): Configuration => ({
   mode: dev ? 'development' : 'production',
   entry: './src/main.tsx',
