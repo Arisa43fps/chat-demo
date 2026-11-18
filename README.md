@@ -33,7 +33,7 @@ The output is written to `dist/`. Deploy it to a static web server or open `dist
 docker compose up -d --build
 ```
 
-The image is multi-stage: Node builds `dist/`, then only the static files ship in `nginx:alpine-slim`. `ROUTER_ORIGIN` (see `docker-compose.yml`) points nginx's `/router` proxy at the 9Router gateway; set it to an address the container can reach, then rebuild only if the build-time `apiOrigin` changed.
+The image is multi-stage: Node builds `dist/`, then only the static files ship in `nginx:alpine-slim`. `ROUTER_ORIGIN` (see `docker-compose.yml`) points nginx's `/router` proxy at the 9Router gateway. It is read at container start, so changing it only needs `docker compose up -d`, no rebuild; rebuilding is only required when the build-time `apiOrigin` changes.
 
 ## Features
 
