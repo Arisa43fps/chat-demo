@@ -1,0 +1,14 @@
+services:
+  chat-demo:
+    build: .
+    image: chat-demo:latest
+    container_name: chat-demo
+    ports:
+      - "8080:8080"
+    environment:
+      # Address of the 9Router gateway as seen from inside the container.
+      # Set it in a local .env file or the shell; it must be reachable from
+      # the container, so 127.0.0.1 only works if 9Router shares the network.
+      # When 9Router runs on the Docker host, use the host LAN IP.
+      ROUTER_ORIGIN: ${ROUTER_ORIGIN:-http://127.0.0.1:20128}
+    restart: unless-stopped

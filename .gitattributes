@@ -1,0 +1,5 @@
+* text=auto eol=lf
+
+Dockerfile text eol=lf
+*.template text eol=lf
+docker-compose.yml text eol=lf

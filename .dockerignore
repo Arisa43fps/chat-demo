@@ -1,0 +1,10 @@
+node_modules
+dist
+.git
+.gitignore
+.commandcode
+*.log
+Dockerfile
+docker-compose.yml
+.dockerignore
+README.zh-CN.md

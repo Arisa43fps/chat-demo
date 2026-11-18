@@ -27,6 +27,14 @@ pnpm build
 
 The output is written to `dist/`. Deploy it to a static web server or open `dist/index.html` directly. Opening the file directly requires browser support for storage on `file://` pages and an API service that permits their cross-origin requests.
 
+### Docker
+
+```sh
+docker compose up -d --build
+```
+
+The image is multi-stage: Node builds `dist/`, then only the static files ship in `nginx:alpine-slim`. `ROUTER_ORIGIN` (see `docker-compose.yml`) points nginx's `/router` proxy at the 9Router gateway; set it to an address the container can reach, then rebuild only if the build-time `apiOrigin` changed.
+
 ## Features
 
 - Multiple conversations with automatic titles, renaming, and deletion; edit prompts, regenerate replies, and switch between message branches.
